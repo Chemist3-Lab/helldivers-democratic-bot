@@ -666,5 +666,5 @@ All configuration is loaded from environment variables (`.env` file supported vi
 | `WAR_POLL_SECONDS` | `int` | ❌ | `300` | War API poll interval |
 | `NEWS_POLL_SECONDS` | `int` | ❌ | `600` | Steam News poll interval |
 | `LOG_LEVEL` | `str` | ❌ | `INFO` | Python logging level |
-| `GEMINI_MODEL` | `str` | ❌ | `gemini-2.0-flash` | Gemini model for chat/vision |
+| `GEMINI_MODEL` | `str` | ❌ | `gemini-3.6-flash` | Gemini model for chat/vision |
 | `GEMINI_EMBEDDING_MODEL` | `str` | ❌ | `text-embedding-004` | Gemini model for embeddings |

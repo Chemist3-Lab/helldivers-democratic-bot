@@ -31,7 +31,7 @@ def calculate_mission_dvr(
     accuracy_pct: float,
     stims_used: int,
     friendly_fire_dmg: float,
-    difficulty: int,
+    difficulty: int | None = None,
     w: DVRWeights = DVRWeights(),
 ) -> float:
     """Calculate the DVR score for a single mission extraction.
@@ -42,13 +42,16 @@ def calculate_mission_dvr(
         accuracy_pct: Accuracy percentage (0–100).
         stims_used: Number of stim packs used.
         friendly_fire_dmg: Cumulative friendly fire damage dealt.
-        difficulty: Mission difficulty level (1–10).
+        difficulty: Optional mission difficulty level (1–10). Defaults to 1.0 multiplier if omitted.
         w: Tunable weight parameters.
 
     Returns:
         Non-negative DVR score for the mission.
     """
-    diff_mult = 0.5 + 0.5 * difficulty
+    if difficulty is not None and difficulty >= 1:
+        diff_mult = 0.5 + 0.5 * difficulty
+    else:
+        diff_mult = 1.0
 
     kill_norm = min(kills / w.kill_cap, 1.0)
     acc_norm = accuracy_pct / 100.0

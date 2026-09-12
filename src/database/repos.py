@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from sqlalchemy import desc, select
+from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -155,6 +155,19 @@ class ProfileRepository:
                 )
             result = await session.execute(stmt)
             return list(result.scalars().all())
+
+    @staticmethod
+    async def purge_all_records() -> int:
+        """Purge all Helldiver dossiers and combat debrief records.
+
+        Deletes MissionRecord entries first to satisfy foreign key constraints,
+        then deletes HelldiverProfile entries.
+        """
+        async with get_session() as session:
+            await session.execute(delete(MissionRecord))
+            res = await session.execute(delete(HelldiverProfile))
+            await session.commit()
+            return res.rowcount if hasattr(res, "rowcount") else 0
 
 
 class MissionRepository:

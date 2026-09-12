@@ -52,13 +52,14 @@ class NewsCog(commands.Cog, name="Steam News"):
         await self.bot.wait_until_ready()
 
     async def _get_alert_channel(self) -> discord.TextChannel | None:
-        """Retrieve the configured alert channel object."""
-        channel = self.bot.get_channel(self.bot.settings.alert_channel_id)
+        """Retrieve the configured Helldiver broadcast channel object."""
+        channel_id = self.bot.settings.helldiver_channel_id
+        channel = self.bot.get_channel(channel_id)
         if channel is None:
             try:
-                channel = await self.bot.fetch_channel(self.bot.settings.alert_channel_id)
+                channel = await self.bot.fetch_channel(channel_id)
             except Exception:
-                log.warning("Could not fetch alert channel %s", self.bot.settings.alert_channel_id)
+                log.warning("Could not fetch Helldiver broadcast channel %s", channel_id)
                 return None
         if isinstance(channel, discord.TextChannel):
             return channel

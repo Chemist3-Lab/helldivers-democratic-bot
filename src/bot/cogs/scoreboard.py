@@ -1,16 +1,10 @@
 """Automated Scoreboard Debrief & MMR System Cog.
 
-Listens on `on_message` for image attachments in `DEBRIEF_CHANNEL_ID`:
-1. Validates and downloads screenshot bytes.
-2. Extracts player stats via `ScoreboardVisionExtractor` (Gemini Flash).
-3. Calculates Democratic Valor Rating (DVR) score for each player.
-4. Commits `MissionRecord` and updates `HelldiverProfile` in SQLite.
-5. Generates patriotic debrief commentary via `MinistryPersona`.
-6. Replies with a structured mission debrief embed.
-
-Includes slash commands:
+Provides slash commands:
+- `/debrief <image> [difficulty]`: Submit an end-of-mission extraction scoreboard for telemetry parsing and DVR scoring.
 - `/leaderboard [sort_by]`: View top Helldivers by total DVR or accuracy.
 - `/profile [user]`: View career service record and aggregate stats.
+- `/reset_leaderboard <confirm>`: Administrative purge of all Helldiver dossiers and records.
 """
 
 from __future__ import annotations
@@ -35,6 +29,7 @@ log = logging.getLogger(__name__)
 DEBRIEF_EMBED_COLOR = 0x00FF88
 LEADERBOARD_GOLD = 0xFFD700
 PROFILE_PURPLE = 0x9B5DE5
+PURGE_RED = 0xFF4444
 
 
 class ScoreboardCog(commands.Cog, name="Scoreboard"):
@@ -51,111 +46,147 @@ class ScoreboardCog(commands.Cog, name="Scoreboard"):
             model_name=self.bot.settings.gemini_model,
         )
 
-    @commands.Cog.listener()
-    async def on_message(self, message: discord.Message) -> None:
-        """Listen for mission extraction screenshots uploaded to DEBRIEF_CHANNEL_ID."""
-        # 1. Ignore bot messages
-        if message.author.bot:
-            return
-
-        # 2. Check channel restriction
-        if message.channel.id != self.bot.settings.debrief_channel_id:
-            return
-
-        # 3. Check for image attachments
-        image_attachments = [
-            att for att in message.attachments
-            if att.content_type and att.content_type.startswith("image/")
-        ]
-        if not image_attachments:
-            return
-
-        # 4. Check if message was already processed
-        if await MissionRepository.is_message_processed(message.id):
-            return
-
-        # Indicate processing via typing indicator and reaction
-        try:
-            await message.add_reaction("🦅")
-        except discord.DiscordException:
-            pass
-
-        async with message.channel.typing():
-            await self._process_debrief_screenshot(message, image_attachments[0])
-
-    async def _process_debrief_screenshot(
+    @app_commands.command(
+        name="debrief",
+        description="Submit a post-mission scoreboard screenshot for Ministry performance audit and DVR calculation.",
+    )
+    @app_commands.describe(
+        image="Screenshot of the mission extraction scoreboard",
+        difficulty="Optional mission difficulty level (1-10)",
+    )
+    @app_commands.choices(difficulty=[
+        app_commands.Choice(name="1 - Trivial", value=1),
+        app_commands.Choice(name="2 - Easy", value=2),
+        app_commands.Choice(name="3 - Medium", value=3),
+        app_commands.Choice(name="4 - Challenging", value=4),
+        app_commands.Choice(name="5 - Hard", value=5),
+        app_commands.Choice(name="6 - Extreme", value=6),
+        app_commands.Choice(name="7 - Suicide Mission", value=7),
+        app_commands.Choice(name="8 - Impossible", value=8),
+        app_commands.Choice(name="9 - Helldive", value=9),
+        app_commands.Choice(name="10 - Super Helldive", value=10),
+    ])
+    async def debrief(
         self,
-        message: discord.Message,
-        attachment: discord.Attachment,
+        interaction: discord.Interaction,
+        image: discord.Attachment,
+        difficulty: app_commands.Choice[int] | None = None,
     ) -> None:
-        """Download image, invoke Gemini vision, calculate DVR, persist, and respond."""
-        try:
-            image_bytes = await attachment.read()
-            mime_type = attachment.content_type or "image/png"
+        """Process mission extraction scoreboard screenshot, calculate DVR, and log career progress."""
+        # 1. Channel Guard: verify command executed in authorized helldiver channel
+        auth_channel_id = self.bot.settings.helldiver_channel_id
+        if interaction.channel_id != auth_channel_id:
+            await interaction.response.send_message(
+                f"⚠️ **Unauthorized Tactical Channel:** Mission debriefs must be submitted in the authorized tactical channel (<#{auth_channel_id}>).",
+                ephemeral=True,
+            )
+            return
 
-            # Run Gemini structured extraction
+        # 2. Attachment Validation
+        if not image.content_type or not image.content_type.startswith("image/"):
+            await interaction.response.send_message(
+                "⚠️ Invalid tactical payload. Please attach a valid image file.",
+                ephemeral=True,
+            )
+            return
+
+        # 3. Immediate Deferral to prevent interaction timeout while Gemini processes
+        await interaction.response.defer(thinking=True)
+
+        # 4. Check for duplicate processing by attachment ID
+        if await MissionRepository.is_message_processed(image.id):
+            await interaction.followup.send(
+                "📋 **Duplicate Extraction:** This mission scoreboard has already been processed into the Super Earth Archives.",
+                ephemeral=True,
+            )
+            return
+
+        try:
+            # 5. Byte Streaming & Extraction
+            image_bytes = await image.read()
+            mime_type = image.content_type or "image/png"
+
+            # Run Gemini structured vision extraction (names + stats only)
             extraction: ScoreboardExtraction = await self.vision.extract_scoreboard(
                 image_bytes=image_bytes,
                 mime_type=mime_type,
             )
 
             if not extraction.players:
-                await message.reply(
+                await interaction.followup.send(
                     "⚠️ **Debrief Rejected:** The Ministry of Truth could not detect any readable Helldiver mission statistics in this screenshot. Ensure the full victory/extraction scoreboard is visible.",
                 )
                 return
 
-            # Map the uploading Discord user or match by names
-            # The uploader is linked to the first player or closest match
-            submitter = message.author
-            submitter_profile = await ProfileRepository.get_or_create_profile(
-                discord_id=submitter.id,
-                display_name=submitter.display_name,
-            )
+            submitter = interaction.user
+            diff_val: int | None = difficulty.value if difficulty is not None else None
 
-            # Calculate DVR for each player and persist
+            # 6. Data Processing & Storage for each player row
             player_results: list[tuple[PlayerExtraction, float]] = []
 
             for idx, p in enumerate(extraction.players):
-                # Calculate DVR
+                # Calculate DVR (defaults to 1.0 multiplier if difficulty is None)
                 dvr_pts = calculate_mission_dvr(
                     kills=p.kills,
                     deaths=p.deaths,
                     accuracy_pct=p.accuracy_pct,
                     stims_used=p.stims_used,
                     friendly_fire_dmg=p.friendly_fire_dmg,
-                    difficulty=p.difficulty or extraction.difficulty,
+                    difficulty=diff_val,
                 )
                 player_results.append((p, dvr_pts))
 
-                # Primary submitter updates their profile with the primary row (first player or matching username)
-                if idx == 0 or p.name.lower() in submitter.display_name.lower():
-                    updated_prof = await ProfileRepository.record_mission_stats(
-                        discord_id=submitter.id,
-                        display_name=submitter.display_name,
-                        kills=p.kills,
-                        deaths=p.deaths,
-                        stims_used=p.stims_used,
-                        accuracy_pct=p.accuracy_pct,
-                        friendly_fire_dmg=p.friendly_fire_dmg,
-                        dvr_score=dvr_pts,
-                    )
-                    # Commit mission record
-                    await MissionRepository.create_mission_record(
-                        profile_id=updated_prof.id or 1,
-                        submitted_by=submitter.id,
-                        message_id=message.id,
-                        kills=p.kills,
-                        deaths=p.deaths,
-                        stims_used=p.stims_used,
-                        accuracy_pct=p.accuracy_pct,
-                        friendly_fire_dmg=p.friendly_fire_dmg,
-                        difficulty=p.difficulty or extraction.difficulty,
-                        dvr_score=dvr_pts,
-                        raw_gemini_response=extraction.model_dump_json(),
-                    )
+                # Match player identity to Discord user
+                is_submitter = (
+                    p.name.lower() in submitter.display_name.lower()
+                    or submitter.display_name.lower() in p.name.lower()
+                    or (idx == 0 and len(extraction.players) == 1)
+                )
 
-            # Generate debrief commentary for submitter/top player
+                target_discord_id: int | None = submitter.id if is_submitter else None
+                target_display_name = submitter.display_name if is_submitter else p.name
+
+                if not target_discord_id and interaction.guild:
+                    for member in interaction.guild.members:
+                        if (
+                            member.name.lower() == p.name.lower()
+                            or member.display_name.lower() == p.name.lower()
+                        ):
+                            target_discord_id = member.id
+                            target_display_name = member.display_name
+                            break
+
+                if not target_discord_id:
+                    target_discord_id = int(abs(hash(f"helldiver_{p.name.lower()}")) % (10**15) + 10**16)
+
+                # Update or create HelldiverProfile
+                updated_prof = await ProfileRepository.record_mission_stats(
+                    discord_id=target_discord_id,
+                    display_name=target_display_name,
+                    kills=p.kills,
+                    deaths=p.deaths,
+                    stims_used=p.stims_used,
+                    accuracy_pct=p.accuracy_pct,
+                    friendly_fire_dmg=p.friendly_fire_dmg,
+                    dvr_score=dvr_pts,
+                )
+
+                # Commit MissionRecord
+                await MissionRepository.create_mission_record(
+                    profile_id=updated_prof.id or 1,
+                    submitted_by=submitter.id,
+                    message_id=image.id,
+                    kills=p.kills,
+                    deaths=p.deaths,
+                    stims_used=p.stims_used,
+                    accuracy_pct=p.accuracy_pct,
+                    friendly_fire_dmg=p.friendly_fire_dmg,
+                    difficulty=diff_val if diff_val is not None else 1,
+                    dvr_score=dvr_pts,
+                    raw_gemini_response=extraction.model_dump_json(),
+                )
+
+            # 7. Debrief Commentary & Rich Output Embed
             lead_player, lead_dvr = player_results[0]
             commentary = await self.persona.generate_debrief_commentary(
                 player_name=submitter.display_name,
@@ -164,40 +195,57 @@ class ScoreboardCog(commands.Cog, name="Scoreboard"):
                 accuracy_pct=lead_player.accuracy_pct,
                 friendly_fire_dmg=lead_player.friendly_fire_dmg,
                 dvr_score=lead_dvr,
-                difficulty=extraction.difficulty,
+                difficulty=diff_val,
             )
 
-            # Build debrief response embed
+            total_squad_kills = sum(p.kills for p in extraction.players)
+            total_squad_deaths = sum(p.deaths for p in extraction.players)
+            status_text = "Mission Extracted ✅" if extraction.mission_success else "Extraction Failed / MIA ⚠️"
+
             embed = discord.Embed(
-                title=f"📋 MISSION EXTRACTION DEBRIEF — DIFFICULTY {extraction.difficulty}",
-                description=f"*{commentary}*\n\n**Processed Extraction Telemetry:**",
+                title="📋 MISSION EXTRACTION DEBRIEF",
                 color=DEBRIEF_EMBED_COLOR,
             )
 
+            # Mission & Squad Summary (difficulty removed from header)
+            squad_summary = (
+                f"**Operation Status:** {status_text}\n"
+                f"**Squad Casualties:** `{total_squad_deaths}` Helldivers | **Total Enemies Purged:** `{total_squad_kills:,}`"
+            )
+            embed.add_field(name="🛡️ Mission & Squad Summary", value=squad_summary, inline=False)
+
+            # Individual Helldiver Breakdown
             for p, score in player_results:
+                score_sign = "+" if score >= 0 else ""
                 val = (
-                    f"💀 **Kills:** {p.kills} | ⚰️ **Deaths:** {p.deaths}\n"
-                    f"🎯 **Acc:** {p.accuracy_pct:.1f}% | 💉 **Stims:** {p.stims_used}\n"
-                    f"⚠️ **FF Dmg:** {p.friendly_fire_dmg:.0f} | 🎖️ **DVR Points:** `+{score:.1f}`"
+                    f"💀 **Kills:** {p.kills:,} | ⚰️ **Deaths:** {p.deaths}\n"
+                    f"🎯 **Accuracy:** {p.accuracy_pct:.1f}% | 💉 **Stims Used:** {p.stims_used}\n"
+                    f"⚠️ **Friendly Fire:** {p.friendly_fire_dmg:.0f} dmg | 🎖️ **Net DVR Points:** `{score_sign}{score:.1f}`"
                 )
-                embed.add_field(name=f"🎖️ {p.name}", value=val, inline=False)
+                embed.add_field(name=f"🎖️ Helldiver {p.name}", value=val, inline=False)
+
+            # Ministry Assessment
+            embed.add_field(
+                name="🦅 High Command Assessment",
+                value=f"*{commentary}*",
+                inline=False,
+            )
 
             embed.set_author(
-                name="Ministry of Truth Automated Debrief Terminal",
+                name="Super Earth Ministry of Truth Performance Audit",
                 icon_url="https://images.wikia.com/helldivers/images/4/47/Super_Earth_Logo.png",
             )
-            embed.set_footer(text=f"Submitted by {submitter.display_name} · Points added to Super Earth Career Record")
+            embed.set_footer(
+                text=f"Submitted by {submitter.display_name} · Career records committed to Super Earth Archives"
+            )
 
-            await message.reply(embed=embed)
-            try:
-                await message.add_reaction("✅")
-            except discord.DiscordException:
-                pass
+            await interaction.followup.send(embed=embed)
 
         except Exception as e:
             log.exception("Error processing mission debrief: %s", e)
-            await message.reply(
+            await interaction.followup.send(
                 "❌ **Terminal Error:** An anomaly occurred during image analysis. Please verify the image is uncompressed and readable.",
+                ephemeral=True,
             )
 
     @app_commands.command(name="leaderboard", description="View top Helldivers ranked by Democratic Valor Rating (DVR).")
@@ -215,7 +263,7 @@ class ScoreboardCog(commands.Cog, name="Scoreboard"):
 
         if not profiles:
             await interaction.followup.send(
-                "🎖️ **No Records Filed:** No Helldiver debrief records have been committed to the archives yet. Submit mission screenshots in the debrief channel!",
+                "🎖️ **No Records Filed:** No Helldiver debrief records have been committed to the archives yet. Submit mission screenshots with `/debrief`!",
             )
             return
 
@@ -258,7 +306,7 @@ class ScoreboardCog(commands.Cog, name="Scoreboard"):
         if prof is None or prof.total_missions == 0:
             msg = (
                 f"📋 **No Service Record Found:** Helldiver **{target.display_name}** has not submitted any mission debriefs. "
-                "Post extraction screenshots in the debrief channel to establish a career dossier!"
+                "Use `/debrief` with an extraction scoreboard screenshot to establish a career dossier!"
             )
             await interaction.followup.send(msg)
             return
@@ -299,6 +347,58 @@ class ScoreboardCog(commands.Cog, name="Scoreboard"):
         embed.set_footer(text="Official Super Earth Military Personnel Registry · Freedom Forever")
         await interaction.followup.send(embed=embed)
 
+    @app_commands.command(
+        name="reset_leaderboard",
+        description="Purge all Helldiver dossiers and combat debrief records (Admin only).",
+    )
+    @app_commands.describe(confirm="Confirm complete archive wipe (True to execute)")
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.guild_only()
+    async def reset_leaderboard(self, interaction: discord.Interaction, confirm: bool) -> None:
+        """Administrative purge of all career profiles and mission records."""
+        # 1. Administrator Permission Guard
+        is_admin = getattr(getattr(interaction.user, "guild_permissions", None), "administrator", False)
+        if not is_admin:
+            await interaction.response.send_message(
+                "🚫 **Access Denied:** Only Super Earth Server Administrators possess clearance to purge Ministry archives.",
+                ephemeral=True,
+            )
+            return
+
+        # 2. Confirmation Check
+        if not confirm:
+            await interaction.response.send_message(
+                "⚠️ **Purge Aborted:** Ministry Archive purge requires explicit confirmation (`confirm=True`). Archives remain intact.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.defer(thinking=True)
+
+        try:
+            await ProfileRepository.purge_all_records()
+
+            embed = discord.Embed(
+                title="🧹 Ministry Archive Purge Complete",
+                description="*🧹 Ministry Archive Purge Complete: All Helldiver dossiers and combat debrief records have been reset to zero.*",
+                color=PURGE_RED,
+            )
+            embed.set_author(
+                name="Super Earth Ministry of Truth Archives",
+                icon_url="https://images.wikia.com/helldivers/images/4/47/Super_Earth_Logo.png",
+            )
+            embed.set_footer(
+                text=f"Purge authorized by {interaction.user.display_name} · All dossiers expunged"
+            )
+            await interaction.followup.send(embed=embed)
+        except Exception as e:
+            log.exception("Error executing archive purge: %s", e)
+            await interaction.followup.send(
+                "❌ **Terminal Error:** Failed to purge archives due to an unexpected database error.",
+                ephemeral=True,
+            )
+
 
 async def setup(bot: HelldiversBot) -> None:
     await bot.add_cog(ScoreboardCog(bot))
+

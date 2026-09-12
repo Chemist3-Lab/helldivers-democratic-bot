@@ -10,7 +10,7 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Resolve project root (two levels up from this file: src/config.py → project root)
@@ -52,9 +52,44 @@ class Settings(BaseSettings):
 
     # ── Required Discord IDs ────────────────────────────────────
     guild_id: int = Field(..., description="Target Discord server snowflake.")
-    alert_channel_id: int = Field(..., description="Channel ID for war/news alerts.")
-    debrief_channel_id: int = Field(..., description="Channel ID for scoreboard screenshots.")
+    helldiver_channel_id: int | None = Field(
+        default=None,
+        description="Unified Discord channel ID for all war alerts, news dispatches, and mission debriefs.",
+    )
+    alert_channel_id_legacy: int | None = Field(
+        default=None,
+        alias="alert_channel_id",
+        description="Legacy alias for alert channel.",
+    )
+    debrief_channel_id_legacy: int | None = Field(
+        default=None,
+        alias="debrief_channel_id",
+        description="Legacy alias for debrief channel.",
+    )
     helldiver_role_id: int = Field(..., description="Role ID to ping on alerts.")
+
+    @model_validator(mode="after")
+    def _resolve_channel_ids(self) -> Settings:
+        if self.helldiver_channel_id is None:
+            resolved = self.alert_channel_id_legacy or self.debrief_channel_id_legacy
+            if resolved is None:
+                raise ValueError(
+                    "Missing required setting: 'helldiver_channel_id' (or legacy 'alert_channel_id')"
+                )
+            self.helldiver_channel_id = resolved
+        return self
+
+    @property
+    def alert_channel_id(self) -> int:
+        """Backward compatibility alias for helldiver_channel_id."""
+        assert self.helldiver_channel_id is not None
+        return self.helldiver_channel_id
+
+    @property
+    def debrief_channel_id(self) -> int:
+        """Backward compatibility alias for helldiver_channel_id."""
+        assert self.helldiver_channel_id is not None
+        return self.helldiver_channel_id
 
     # ── Database ────────────────────────────────────────────────
     database_url: str = Field(
@@ -73,12 +108,16 @@ class Settings(BaseSettings):
         ge=60,
         description="Interval in seconds between Steam News API polls.",
     )
+    hd2_contact: str = Field(
+        default="github.com/Shinoruba",
+        description="Contact information sent via X-Super-Contact header to api.helldivers2.dev.",
+    )
     log_level: str = Field(
         default="INFO",
         description="Python logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL).",
     )
     gemini_model: str = Field(
-        default="gemini-2.0-flash",
+        default="gemini-3.6-flash",
         description="Gemini model name for chat and vision tasks.",
     )
     gemini_embedding_model: str = Field(

@@ -42,7 +42,6 @@ class PlayerExtraction(BaseModel):
     stims_used: int = Field(default=0, ge=0, description="Number of stim packs consumed.")
     accuracy_pct: float = Field(default=0.0, ge=0.0, le=100.0, description="Shots hit percentage.")
     friendly_fire_dmg: float = Field(default=0.0, ge=0.0, description="Accidental damage to allies.")
-    difficulty: int = Field(default=1, ge=1, le=10, description="Mission difficulty rating.")
 
     @field_validator("accuracy_pct", mode="before")
     @classmethod
@@ -83,7 +82,6 @@ class PlayerExtraction(BaseModel):
 class ScoreboardExtraction(BaseModel):
     """Top-level container for all player metrics in a scoreboard screenshot."""
 
-    difficulty: int = Field(default=1, ge=1, le=10, description="Mission difficulty level.")
     mission_success: bool = Field(default=True, description="Whether the extraction/mission succeeded.")
     players: list[PlayerExtraction] = Field(
         default_factory=list,
@@ -96,18 +94,23 @@ class ScoreboardExtraction(BaseModel):
 
 VISION_SYSTEM_INSTRUCTION = """You are an automated Super Earth Military Intelligence Vision Processing Unit.
 Analyze this Helldivers 2 post-mission extraction debrief screenshot.
-Extract the stats for EVERY player listed on the scoreboard table.
+Extract the telemetry stats for EVERY player listed on the scoreboard table.
 
-Metrics to extract per player:
-- name: Player username / callsign
-- kills: Total kills count
-- deaths: Times died
-- stims_used: Stims used
-- accuracy_pct: Shot accuracy percentage (e.g. 72.5)
-- friendly_fire_dmg: Friendly fire damage count
-- difficulty: The difficulty level of the mission (1-10, e.g. Trivial=1, Helldive=9, Super Helldive=10). If uncertain, default to 7.
+IMPORTANT NOTE ON DIFFICULTY:
+- Helldivers 2 post-mission scoreboards DO NOT display mission difficulty. Do NOT attempt to guess, estimate, or extract difficulty.
 
-Ensure accurate numbers. Return only data matching the required schema."""
+Strict Schema & Bounding Constraints:
+- Return ONLY valid JSON strictly conforming to the ScoreboardExtraction schema.
+- mission_success: Boolean indicating if the squad extracted or completed the primary mission (true if Victory/Extracted, false if Defeat/MIA).
+- players: Array containing an entry for every distinct Helldiver on the scoreboard with:
+  * name: Player gamertag / callsign exactly as visible on screen.
+  * kills: Non-negative integer (>= 0).
+  * deaths: Non-negative integer (>= 0).
+  * stims_used: Non-negative integer (>= 0).
+  * accuracy_pct: Floating point percentage bounded strictly between 0.0 and 100.0 (e.g. 78.5). Do NOT include the '%' character.
+  * friendly_fire_dmg: Non-negative floating point or integer damage dealt to teammates (>= 0.0).
+
+All numerical stats must be non-negative. Do not fabricate missing rows."""
 
 
 class ScoreboardVisionExtractor:
@@ -116,7 +119,7 @@ class ScoreboardVisionExtractor:
     def __init__(
         self,
         api_key: str,
-        model_name: str = "gemini-2.0-flash",
+        model_name: str = "gemini-3.6-flash",
     ) -> None:
         self.api_key = api_key
         self.model_name = model_name
@@ -154,11 +157,33 @@ class ScoreboardVisionExtractor:
             response_schema=ScoreboardExtraction,
         )
 
-        response = await self.client.aio.models.generate_content(
-            model=self.model_name,
-            contents=[prompt, image_part],
-            config=config,
-        )
+        models_to_try = [self.model_name]
+        for fallback in ("gemini-3.6-flash", "gemini-1.5-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"):
+            if fallback not in models_to_try:
+                models_to_try.append(fallback)
+
+        response = None
+        last_err: Exception | None = None
+        for model in models_to_try:
+            try:
+                response = await self.client.aio.models.generate_content(
+                    model=model,
+                    contents=[prompt, image_part],
+                    config=config,
+                )
+                break
+            except Exception as exc:
+                last_err = exc
+                err_str = str(exc)
+                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "404" in err_str or "NOT_FOUND" in err_str:
+                    log.warning("Vision model %s encountered quota/not-found error, trying next fallback: %s", model, exc)
+                    continue
+                raise
+
+        if response is None:
+            if last_err:
+                raise last_err
+            raise RuntimeError("Vision model generation failed without returning a response.")
 
         raw_text = response.text or "{}"
         try:
@@ -171,10 +196,4 @@ class ScoreboardVisionExtractor:
             except Exception:
                 log.error("Failed to parse vision response as ScoreboardExtraction: %s", raw_text)
                 raise ValueError(f"Could not parse scoreboard extraction: {e}") from e
-
-        # Propagate top-level difficulty to players if individual difficulty is missing or default
-        for p in parsed.players:
-            if p.difficulty == 1 and parsed.difficulty > 1:
-                p.difficulty = parsed.difficulty
-
         return parsed
