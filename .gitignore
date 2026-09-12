@@ -21,3 +21,12 @@ env/
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Runtime data
+data/*.db
+data/*.db-wal
+data/*.db-shm
+wiki_chunks/
+
+# uv
+uv.lock
