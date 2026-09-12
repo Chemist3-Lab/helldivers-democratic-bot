@@ -31,6 +31,13 @@ async def init_db(db_url: str) -> None:
     """
     global _engine, _async_session_factory  # noqa: PLW0603
 
+    # If sqlite file path, ensure parent directory exists
+    if "sqlite" in db_url and ":///" in db_url:
+        path_str = db_url.split(":///", 1)[1]
+        if path_str and not path_str.startswith(":memory:"):
+            from pathlib import Path
+            Path(path_str).parent.mkdir(parents=True, exist_ok=True)
+
     _engine = create_async_engine(
         db_url,
         echo=False,

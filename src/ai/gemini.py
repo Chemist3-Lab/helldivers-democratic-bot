@@ -1,12 +1,12 @@
-"""Gemini API wrapper — chat, vision, and embeddings.
+"""Backward compatibility and unified access for AI modules."""
 
-Thin async wrapper around the google-genai SDK providing:
-- Chat completions with the Ministry of Truth persona.
-- Vision extraction for scoreboard screenshots.
-- Text embeddings for wiki RAG.
+from src.ai.vision import ScoreboardVisionExtractor, ScoreboardExtraction, PlayerExtraction
+from src.ai.persona import MinistryPersona, MINISTRY_OF_TRUTH_SYSTEM_INSTRUCTION
 
-See ARCHITECTURE.md §6.1 for async safety requirements and
-§8.3 for the vision extraction prompt specification.
-"""
-
-from __future__ import annotations
+__all__ = [
+    "ScoreboardVisionExtractor",
+    "ScoreboardExtraction",
+    "PlayerExtraction",
+    "MinistryPersona",
+    "MINISTRY_OF_TRUTH_SYSTEM_INSTRUCTION",
+]

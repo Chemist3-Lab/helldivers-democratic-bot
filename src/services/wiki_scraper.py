@@ -1,9 +1,5 @@
-"""Wiki scraper and chunker for helldivers.wiki.gg.
+"""Backward compatibility alias for wiki_client."""
 
-Scrapes tactical data pages, chunks content for embedding,
-and caches results to disk (JSON) with a 24-hour TTL.
+from src.services.wiki_client import WikiClient, WikiArticle, WikiSearchResult
 
-See ARCHITECTURE.md §7.1 for caching policy.
-"""
-
-from __future__ import annotations
+__all__ = ["WikiClient", "WikiArticle", "WikiSearchResult"]

@@ -1,9 +1,5 @@
-"""Helldivers 2 Community API client.
+"""Backward compatibility alias for hd2_api."""
 
-Typed async HTTP client for https://api.helldivers2.dev/api/v1/
-covering Major Orders, Dispatches, and Campaigns endpoints.
+from src.services.hd2_api import HD2ApiClient, MajorOrder, Dispatch, Campaign, PlanetInfo
 
-See ARCHITECTURE.md §7.1 for rate-limiting and caching policy.
-"""
-
-from __future__ import annotations
+__all__ = ["HD2ApiClient", "MajorOrder", "Dispatch", "Campaign", "PlanetInfo"]

@@ -38,8 +38,8 @@ async def _run() -> None:
     # ── Database ────────────────────────────────────────────────
     from src.database.engine import init_db
 
-    await init_db(settings.db_url)
-    log.info("Database initialized at %s", settings.resolved_db_path)
+    await init_db(settings.database_url)
+    log.info("Database initialized at %s", settings.database_url)
 
     # ── Bot ─────────────────────────────────────────────────────
     from src.bot.bot import create_bot

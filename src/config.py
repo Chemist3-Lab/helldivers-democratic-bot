@@ -6,6 +6,7 @@ environment variables and/or a `.env` file in the project root.
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -14,6 +15,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Resolve project root (two levels up from this file: src/config.py → project root)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _default_database_url() -> str:
+    """Determine the default database URL based on runtime environment.
+
+    - If running inside Docker / Railway container with /app/data volume:
+      defaults to 'sqlite+aiosqlite:////app/data/democracy.db'
+    - Otherwise defaults to local development:
+      'sqlite+aiosqlite:///democracy.db'
+    """
+    if Path("/app/data").is_dir() or os.path.exists("/.dockerenv") or os.environ.get("RAILWAY_ENVIRONMENT"):
+        return "sqlite+aiosqlite:////app/data/democracy.db"
+    return "sqlite+aiosqlite:///democracy.db"
 
 
 class Settings(BaseSettings):
@@ -42,11 +56,13 @@ class Settings(BaseSettings):
     debrief_channel_id: int = Field(..., description="Channel ID for scoreboard screenshots.")
     helldiver_role_id: int = Field(..., description="Role ID to ping on alerts.")
 
-    # ── Optional ────────────────────────────────────────────────
-    db_path: str = Field(
-        default="data/helldivers.db",
-        description="Path to the SQLite database file (relative to project root).",
+    # ── Database ────────────────────────────────────────────────
+    database_url: str = Field(
+        default_factory=_default_database_url,
+        description="Async SQLAlchemy database URL (e.g., sqlite+aiosqlite:///democracy.db).",
     )
+
+    # ── Optional ────────────────────────────────────────────────
     war_poll_seconds: int = Field(
         default=300,
         ge=60,
@@ -81,18 +97,9 @@ class Settings(BaseSettings):
         return upper
 
     @property
-    def resolved_db_path(self) -> Path:
-        """Return the absolute path to the SQLite database."""
-        p = Path(self.db_path)
-        if not p.is_absolute():
-            p = PROJECT_ROOT / p
-        p.parent.mkdir(parents=True, exist_ok=True)
-        return p
-
-    @property
     def db_url(self) -> str:
-        """Return the async SQLAlchemy database URL."""
-        return f"sqlite+aiosqlite:///{self.resolved_db_path}"
+        """Return database_url for backwards compatibility with engine initializers."""
+        return self.database_url
 
 
 @lru_cache(maxsize=1)

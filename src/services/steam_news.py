@@ -1,9 +1,15 @@
-"""Steam News API client.
+"""Backward compatibility alias for steam_api."""
 
-Typed async HTTP client for the ISteamNews/GetNewsForApp endpoint
-targeting Helldivers 2 (App ID 553850).
+from src.services.steam_api import (
+    SteamApiClient,
+    SteamNewsItem,
+    SteamNewsResponse,
+    SteamNewsAppResponse,
+)
 
-See ARCHITECTURE.md §7.1 for rate-limiting and caching policy.
-"""
-
-from __future__ import annotations
+__all__ = [
+    "SteamApiClient",
+    "SteamNewsItem",
+    "SteamNewsResponse",
+    "SteamNewsAppResponse",
+]
