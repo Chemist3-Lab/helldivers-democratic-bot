@@ -82,12 +82,30 @@ class MinistryPersona:
         config = types.GenerateContentConfig(
             system_instruction=MINISTRY_OF_TRUTH_SYSTEM_INSTRUCTION,
             temperature=0.6,
-            max_output_tokens=1500,
+            max_output_tokens=4096,
+            safety_settings=[
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                    threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                ),
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                    threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                ),
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                    threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                ),
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                    threshold=types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                ),
+            ],
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
 
         models_to_try = [self.model_name]
-        for fallback in ("gemini-3.6-flash", "gemini-1.5-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"):
+        for fallback in ("gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-flash-latest"):
             if fallback not in models_to_try:
                 models_to_try.append(fallback)
 
@@ -99,6 +117,8 @@ class MinistryPersona:
                     contents=full_prompt,
                     config=config,
                 )
+                if response.candidates and response.candidates[0].finish_reason:
+                    log.debug("Tactical query finish reason: %s (model: %s)", response.candidates[0].finish_reason, model)
                 return response.text or "Transmission received, Helldiver. The Ministry of Truth confirms freedom reigns supreme."
             except Exception as exc:
                 last_err = exc
@@ -148,7 +168,7 @@ class MinistryPersona:
         )
 
         models_to_try = [self.model_name]
-        for fallback in ("gemini-3.6-flash", "gemini-1.5-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"):
+        for fallback in ("gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-flash-latest"):
             if fallback not in models_to_try:
                 models_to_try.append(fallback)
 

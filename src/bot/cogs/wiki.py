@@ -241,6 +241,255 @@ def _format_enemy_embed(embed: discord.Embed, article: WikiArticle) -> bool:
     return True
 
 
+# ─── Tactical Embed & Markdown Splitting Helpers ─────────────────────────────
+
+def _get_unclosed_markdown_tags(text: str) -> tuple[str, str]:
+    """Calculate closing suffix and opening prefix to balance unclosed markdown delimiters.
+
+    Returns (closing_suffix, opening_prefix).
+    """
+    code_block_open = (text.count("```") % 2 != 0)
+
+    sans_code = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
+    sans_code = re.sub(r"`[^`]*`", "", sans_code)
+    inline_code_open = (sans_code.count("`") % 2 != 0)
+    sans_code = re.sub(r"`", "", sans_code)
+
+    bold_open = (sans_code.count("**") % 2 != 0)
+    bold_under_open = (sans_code.count("__") % 2 != 0)
+    strike_open = (sans_code.count("~~") % 2 != 0)
+
+    # Italic single * (ignore list bullets at start of line and **)
+    sans_bold = re.sub(r"\*\*", "", sans_code)
+    sans_bullets = re.sub(r"(?m)^\s*[\*\-]\s+", "", sans_bold)
+    italic_star_open = (sans_bullets.count("*") % 2 != 0)
+
+    # Italic single _ (ignore __)
+    sans_bold_u = re.sub(r"__", "", sans_code)
+    italic_under_open = (sans_bold_u.count("_") % 2 != 0)
+
+    closing_tags: list[str] = []
+    opening_tags: list[str] = []
+
+    if code_block_open:
+        closing_tags.append("\n```")
+        opening_tags.append("```\n")
+    if bold_open:
+        closing_tags.append("**")
+        opening_tags.append("**")
+    if bold_under_open:
+        closing_tags.append("__")
+        opening_tags.append("__")
+    if strike_open:
+        closing_tags.append("~~")
+        opening_tags.append("~~")
+    if italic_star_open:
+        closing_tags.append("*")
+        opening_tags.append("*")
+    if italic_under_open:
+        closing_tags.append("_")
+        opening_tags.append("_")
+    if inline_code_open:
+        closing_tags.append("`")
+        opening_tags.append("`")
+
+    suffix = "".join(reversed(closing_tags))
+    prefix = "".join(opening_tags)
+    return suffix, prefix
+
+
+def safe_markdown_split(text: str, max_len: int = 1000) -> list[str]:
+    """Split markdown text into chunks of at most max_len without breaking markdown formatting.
+
+    If delimiters (**, *, __, _, ~~, ```, `) are sliced across boundary cuts,
+    they are automatically closed at the end of the current chunk and reopened
+    at the start of the next chunk.
+    """
+    clean_text = text.strip()
+    if not clean_text:
+        return []
+    if len(clean_text) <= max_len:
+        suffix, _ = _get_unclosed_markdown_tags(clean_text)
+        return [clean_text + suffix]
+
+    chunks: list[str] = []
+    remaining = clean_text
+    active_prefix = ""
+
+    while remaining:
+        headroom = 24
+        current_max = max(50, max_len - len(active_prefix) - headroom)
+
+        if len(remaining) <= current_max:
+            final_chunk = active_prefix + remaining
+            suffix, _ = _get_unclosed_markdown_tags(final_chunk)
+            chunks.append(final_chunk + suffix)
+            break
+
+        candidate = remaining[:current_max]
+
+        # Natural split points: paragraph -> newline -> sentence -> word
+        p_idx = candidate.rfind("\n\n")
+        if p_idx >= 100:
+            split_idx = p_idx + 2
+        else:
+            nl_idx = candidate.rfind("\n")
+            if nl_idx >= 100:
+                split_idx = nl_idx + 1
+            else:
+                sent_match = None
+                for m in re.finditer(r"[.!?]\s+", candidate):
+                    sent_match = m
+                if sent_match and sent_match.end() >= 100:
+                    split_idx = sent_match.end()
+                else:
+                    sp_idx = candidate.rfind(" ")
+                    if sp_idx >= 100:
+                        split_idx = sp_idx + 1
+                    else:
+                        split_idx = current_max
+
+        # Prevent splitting inside multi-char markdown delimiters
+        for delim in ("```", "**", "__", "~~"):
+            for offset in range(1, len(delim)):
+                if split_idx >= offset and split_idx + (len(delim) - offset) <= len(remaining):
+                    if remaining[split_idx - offset : split_idx + (len(delim) - offset)] == delim:
+                        split_idx -= offset
+                        break
+
+        chunk_raw = remaining[:split_idx].rstrip()
+        remaining = remaining[split_idx:].lstrip()
+
+        full_chunk = active_prefix + chunk_raw
+        suffix, next_prefix = _get_unclosed_markdown_tags(full_chunk)
+
+        chunks.append(full_chunk + suffix)
+        active_prefix = next_prefix
+
+    return chunks
+
+
+def parse_tactical_sections(text: str) -> tuple[str, list[tuple[str, str]]]:
+    """Extract the main overview narrative and individual sections from a tactical response."""
+    # Look for markdown header boundaries (#{1,3} Header)
+    pattern = r"(?:^|\n)(?:---+\s*\n)?(#{1,3}\s+[^\n]+)\n"
+    matches = list(re.finditer(pattern, text))
+
+    # If no #{1,3} headers, look for standalone bold section titles
+    if not matches:
+        bold_pattern = (
+            r"(?:^|\n)(?:---+\s*\n)?"
+            r"(\*\*(?:[A-Z0-9\s—–:-]{3,60}|(?:Authorized|Official|Ballistic|Tactical|High Command)[^*]+)\*\*)\s*:\s*\n"
+        )
+        matches = list(re.finditer(bold_pattern, text))
+
+    if not matches:
+        return text.strip(), []
+
+    # Overview is everything before the first section
+    overview = text[: matches[0].start()].strip()
+    overview = re.sub(r"\n---+\s*$", "", overview).strip()
+
+    sections: list[tuple[str, str]] = []
+    for i, m in enumerate(matches):
+        raw_header = m.group(1).lstrip("#").strip()
+        header = raw_header.strip("* :")
+        start = m.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        body = text[start:end].strip()
+        body = re.sub(r"\n---+\s*$", "", body).strip()
+        if body:
+            sections.append((header, body))
+
+    if not overview and sections:
+        first_h, first_b = sections.pop(0)
+        overview = f"**{first_h}**\n\n{first_b}"
+
+    return overview, sections
+
+
+def build_tactical_embeds(
+    answer: str,
+    matched_article: WikiArticle | None = None,
+    user_display_name: str = "",
+) -> list[discord.Embed]:
+    """Build one or more Discord embeds for a tactical /ask response adhering to character limits."""
+    overview, sections = parse_tactical_sections(answer)
+
+    embeds: list[discord.Embed] = []
+    primary_embed = discord.Embed(
+        title="🦅 MINISTRY OF TRUTH TACTICAL TERMINAL",
+        color=TERMINAL_BLUE,
+    )
+
+    if matched_article:
+        primary_embed.set_footer(
+            text=f"Source: {matched_article.title} ({matched_article.url}) · Super Earth High Command"
+        )
+    else:
+        name_str = f"Helldiver {user_display_name}" if user_display_name else "Helldiver"
+        primary_embed.set_footer(
+            text=f"Inquiry from {name_str} · Super Earth High Command"
+        )
+
+    # Put overview narrative directly in embed.description (Discord limit: 4,096 chars)
+    overview_overflow: list[str] = []
+    if len(overview) <= 4000:
+        primary_embed.description = overview
+    else:
+        ov_chunks = safe_markdown_split(overview, max_len=3950)
+        primary_embed.description = ov_chunks[0]
+        overview_overflow = ov_chunks[1:]
+
+    current_embed = primary_embed
+    embeds.append(current_embed)
+
+    def add_field_safely(name: str, value: str) -> None:
+        nonlocal current_embed
+        # Discord limit: max 25 fields per embed, max 6,000 chars total embed
+        current_len = (
+            len(current_embed.title or "")
+            + len(current_embed.description or "")
+            + sum(len(f.name) + len(f.value) for f in current_embed.fields)
+            + len(current_embed.footer.text or "")
+        )
+        if len(current_embed.fields) >= 20 or current_len + len(name) + len(value) > 5500:
+            current_embed = discord.Embed(
+                title="🦅 MINISTRY OF TRUTH TACTICAL TERMINAL (CONT.)",
+                color=TERMINAL_BLUE,
+            )
+            embeds.append(current_embed)
+
+        current_embed.add_field(name=name[:256], value=value[:1024], inline=False)
+
+    # Add any overflow from overview as fields
+    for idx, ov_chunk in enumerate(overview_overflow, start=1):
+        field_chunks = safe_markdown_split(ov_chunk, max_len=1000)
+        for f_idx, f_val in enumerate(field_chunks):
+            suffix = f" (Part {idx}.{f_idx + 1})" if len(field_chunks) > 1 else f" (Part {idx})"
+            add_field_safely(f"Overview Intelligence{suffix}", f_val)
+
+    # Process tactical sections into fields
+    for header, body in sections:
+        base_header = header[:230].strip()
+        chunks = safe_markdown_split(body, max_len=1000)
+        if len(chunks) == 1:
+            add_field_safely(base_header, chunks[0])
+        else:
+            for part_idx, chunk in enumerate(chunks, start=1):
+                part_title = f"{base_header} (Part {part_idx})"
+                add_field_safely(part_title, chunk)
+
+    # Add verified source citation field if available
+    if matched_article:
+        add_field_safely(
+            "📚 Verified Intelligence Source",
+            f"[{matched_article.title}]({matched_article.url})",
+        )
+
+    return embeds
+
+
 class WikiCog(commands.Cog, name="Ministry of Truth"):
     """Wiki RAG and Ministry of Truth Tactical Terminal commands."""
 
@@ -537,67 +786,14 @@ class WikiCog(commands.Cog, name="Ministry of Truth"):
                 context=context,
             )
 
-            embed = discord.Embed(
-                title="🦅 MINISTRY OF TRUTH TACTICAL TERMINAL",
-                color=TERMINAL_BLUE,
+            # 3. Build structured Discord embeds adhering to description (4,096) and field (1,000) limits
+            embeds = build_tactical_embeds(
+                answer=answer,
+                matched_article=matched_article,
+                user_display_name=interaction.user.display_name,
             )
-            if matched_article:
-                embed.set_footer(
-                    text=f"Source: {matched_article.title} ({matched_article.url}) · Super Earth High Command"
-                )
-            else:
-                embed.set_footer(
-                    text=f"Inquiry from Helldiver {interaction.user.display_name} · Super Earth High Command"
-                )
-
-            # Discord embeds limit description to 4096 characters; chunk into fields if answer is long
-            if len(answer) <= 4000:
-                embed.description = answer
-                if matched_article:
-                    embed.add_field(
-                        name="📚 Verified Intelligence Source",
-                        value=f"[{matched_article.title}]({matched_article.url})",
-                        inline=False,
-                    )
-                await interaction.followup.send(embed=embed)
-            else:
-                split_idx = answer[:3950].rfind("\n")
-                if split_idx <= 0:
-                    split_idx = 3950
-                embed.description = answer[:split_idx].strip()
-                remainder = answer[split_idx:].strip()
-
-                chunk_num = 1
-                while remainder and len(embed.fields) < 20:
-                    if len(remainder) <= 1000:
-                        field_val = remainder
-                        remainder = ""
-                    else:
-                        c_idx = remainder[:950].rfind("\n")
-                        if c_idx <= 0:
-                            c_idx = 950
-                        field_val = remainder[:c_idx].strip()
-                        remainder = remainder[c_idx:].strip()
-                    embed.add_field(
-                        name=f"Tactical Telemetry (Cont. {chunk_num})",
-                        value=field_val,
-                        inline=False,
-                    )
-                    chunk_num += 1
-
-                if matched_article:
-                    embed.add_field(
-                        name="📚 Verified Intelligence Source",
-                        value=f"[{matched_article.title}]({matched_article.url})",
-                        inline=False,
-                    )
-                await interaction.followup.send(embed=embed)
-                if remainder:
-                    cont_embed = discord.Embed(
-                        description=remainder[:4000],
-                        color=TERMINAL_BLUE,
-                    )
-                    await interaction.followup.send(embed=cont_embed)
+            for emb in embeds:
+                await interaction.followup.send(embed=emb)
 
         except Exception as e:
             log.exception("Error during /ask execution: %s", e)

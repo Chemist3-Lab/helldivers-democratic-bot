@@ -382,6 +382,144 @@ def test_wiki_parser_has_druid_support():
     print("[PASS] test_wiki_parser_has_druid_support")
 
 
+# ─── Test 9: Safe Markdown Split Delimiter Repair ───────────────────────────
+
+def test_safe_markdown_split_bold_repair():
+    """safe_markdown_split should auto-close and reopen bold tags across boundaries."""
+    from src.bot.cogs.wiki import safe_markdown_split
+
+    long_intro = "A" * 900
+    bold_target = "**PRIMARY FATAL WEAKPOINT: " + ("B" * 100) + "**"
+    trailing = " - Deploy heavy anti-tank ordnance immediately to secure elimination."
+    full_text = f"{long_intro} {bold_target}{trailing}"
+
+    chunks = safe_markdown_split(full_text, max_len=950)
+    assert len(chunks) >= 2, f"Expected multiple chunks, got {len(chunks)}"
+
+    for idx, chunk in enumerate(chunks):
+        assert len(chunk) <= 950, f"Chunk {idx + 1} exceeds max_len (length: {len(chunk)})"
+
+    # First chunk must close the bold tag
+    assert chunks[0].endswith("**"), f"Chunk 1 did not close bold tag: {repr(chunks[0][-20:])}"
+    # Second chunk must reopen the bold tag
+    assert chunks[1].startswith("**"), f"Chunk 2 did not reopen bold tag: {repr(chunks[1][:20])}"
+    print("[PASS] test_safe_markdown_split_bold_repair")
+
+
+# ─── Test 10: Safe Markdown Split Code Blocks & Lists ────────────────────────
+
+def test_safe_markdown_split_code_blocks_and_bullets():
+    """safe_markdown_split handles code blocks and long bullet lists without corrupting format."""
+    from src.bot.cogs.wiki import safe_markdown_split
+
+    # Long bullet list
+    lines = [f"* Bullet Item {i}: **Telemetry Stat {i}** is verified by High Command." for i in range(40)]
+    bullet_text = "\n".join(lines)
+    chunks = safe_markdown_split(bullet_text, max_len=1000)
+
+    for idx, chunk in enumerate(chunks):
+        assert len(chunk) <= 1000, f"Bullet chunk {idx + 1} exceeds 1000: {len(chunk)}"
+        # Verify no unclosed bold in any chunk
+        assert chunk.count("**") % 2 == 0, f"Unclosed bold in chunk {idx + 1}"
+
+    # Code block split
+    code_text = "```python\n" + "\n".join([f"line_{i} = {i} * 42" for i in range(50)]) + "\n```"
+    code_chunks = safe_markdown_split(code_text, max_len=500)
+    assert len(code_chunks) >= 2
+    for idx, c in enumerate(code_chunks):
+        assert len(c) <= 500, f"Code chunk {idx + 1} exceeds 500: {len(c)}"
+        assert c.count("```") % 2 == 0, f"Unclosed code block in chunk {idx + 1}"
+
+    print("[PASS] test_safe_markdown_split_code_blocks_and_bullets")
+
+
+# ─── Test 11: Tactical Embed Generation & Limits ─────────────────────────────
+
+def test_build_tactical_embeds_structure():
+    """build_tactical_embeds puts overview in description and sections into <=1000 char fields."""
+    import discord
+    from src.bot.cogs.wiki import build_tactical_embeds
+    from src.services.wiki_client import WikiArticle
+
+    weakpoints_list = "".join(["\n* Weakpoint Detail: " + ("x" * 120) for _ in range(12)])
+    sample_answer = (
+        "**ATTENTION, VANGUARD OF LIBERTY!**\n\n"
+        "The Ministry of Truth has processed your tactical query regarding the Charger.\n\n"
+        "---\n\n"
+        "### 📊 OFFICIAL BALLISTIC TELEMETRY: CHARGER WEAK POINTS\n\n"
+        "While the Charger is covered head-to-claw in heavy exoskeleton plates:\n"
+        f"{weakpoints_list}\n\n---\n\n"
+        "### 🎖️ HIGH COMMAND TACTICAL RECOMMENDATIONS\n\n"
+        "* Deploy EAT-17 directly to frontal carapace.\n"
+        "* For Super Earth! For Managed Democracy! 🦅"
+    )
+
+    art = WikiArticle(
+        title="Charger",
+        url="https://helldivers.wiki.gg/wiki/Charger",
+        summary="A terminid beast.",
+        content="...",
+    )
+
+    embeds = build_tactical_embeds(
+        answer=sample_answer,
+        matched_article=art,
+        user_display_name="CitizenSoldier",
+    )
+
+    assert len(embeds) >= 1
+    main_embed = embeds[0]
+
+    # Description must contain overview narrative and stay <= 4096
+    assert "ATTENTION, VANGUARD OF LIBERTY!" in main_embed.description
+    assert len(main_embed.description) <= 4096
+
+    # Verify all fields in all returned embeds have value <= 1000 chars and name <= 256
+    all_fields: list[discord.EmbedField] = []
+    for emb in embeds:
+        for f in emb.fields:
+            all_fields.append(f)
+            assert len(f.name) <= 256, f"Field name too long: {len(f.name)}"
+            assert len(f.value) <= 1000, f"Field value exceeds 1000 limit: {len(f.value)} (name={f.name})"
+
+    field_names = [f.name for f in all_fields]
+    # Check that large section was chunked with (Part 1), (Part 2)
+    assert any("Part 1" in name for name in field_names), f"Missing Part 1 in: {field_names}"
+    assert any("Part 2" in name for name in field_names), f"Missing Part 2 in: {field_names}"
+    # Check that recommendations section is present
+    assert any("RECOMMENDATIONS" in name.upper() for name in field_names)
+    # Check verified source citation field is present
+    assert any("Verified Intelligence Source" in name for name in field_names)
+
+    print("[PASS] test_build_tactical_embeds_structure")
+
+
+# ─── Test 12: Persona Max Output Tokens & Safety Settings ───────────────────
+
+def test_persona_token_limit_and_safety_settings():
+    """Persona answer_tactical_query must configure max_output_tokens >= 1500 and safety settings."""
+    with open("src/ai/persona.py", encoding="utf-8") as f:
+        src = f.read()
+
+    # Verify max_output_tokens is >= 1500 (specifically 4096)
+    match = re.search(r"max_output_tokens\s*=\s*(\d+)", src)
+    assert match, "max_output_tokens not found in persona.py"
+    tokens = int(match.group(1))
+    assert tokens >= 1500, f"max_output_tokens is {tokens}, must be >= 1500"
+    assert tokens == 4096, f"Expected max_output_tokens to be 4096, got {tokens}"
+
+    # Verify safety settings are configured
+    assert "safety_settings" in src, "safety_settings not found in persona.py"
+    assert "BLOCK_ONLY_HIGH" in src, "BLOCK_ONLY_HIGH threshold not set in persona.py"
+
+    # Verify deprecated gemini-1.5-flash is removed from fallbacks
+    assert '"gemini-1.5-flash"' not in src, "Deprecated gemini-1.5-flash still in fallbacks"
+    assert '"gemini-3.6-flash"' in src, "gemini-3.6-flash missing from fallbacks"
+    assert '"gemini-3.5-flash"' in src, "gemini-3.5-flash missing from fallbacks"
+
+    print("[PASS] test_persona_token_limit_and_safety_settings")
+
+
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -399,4 +537,8 @@ if __name__ == "__main__":
     test_enemy_embed_formatting()
     test_stratagem_infobox_keys_updated()
     test_wiki_parser_has_druid_support()
-    print("\nAll 14 unit and integration tests passed successfully!")
+    test_safe_markdown_split_bold_repair()
+    test_safe_markdown_split_code_blocks_and_bullets()
+    test_build_tactical_embeds_structure()
+    test_persona_token_limit_and_safety_settings()
+    print("\nAll 18 unit and integration tests passed successfully!")
