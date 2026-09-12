@@ -53,11 +53,15 @@ class HelldiversBot(commands.Bot):
             except Exception:
                 log.exception("Failed to load extension: %s", ext)
 
-        # Sync slash commands to the target guild for instant availability
-        guild = discord.Object(id=self.settings.guild_id)
-        self.tree.copy_global_to(guild=guild)
-        await self.tree.sync(guild=guild)
-        log.info("Slash commands synced to guild %s", self.settings.guild_id)
+        # Sync slash commands: guild-specific for instant dev sync, or global for multi-guild
+        if self.settings.guild_id and self.settings.guild_id > 0:
+            guild = discord.Object(id=self.settings.guild_id)
+            self.tree.copy_global_to(guild=guild)
+            await self.tree.sync(guild=guild)
+            log.info("Slash commands synced to guild %s (instant development mode)", self.settings.guild_id)
+        else:
+            await self.tree.sync()
+            log.info("Slash commands synced globally across all guilds (production mode)")
 
     async def on_ready(self) -> None:
         """Log successful connection."""

@@ -22,11 +22,16 @@ env/
 .DS_Store
 Thumbs.db
 
-# Runtime data
+# Runtime data & Local databases
 data/*.db
 data/*.db-wal
 data/*.db-shm
+democracy.db*
 wiki_chunks/
+
+# Scratch & Audit Artifacts
+scratch/
+helldivers-bot-technical-audit.md
 
 # uv
 uv.lock

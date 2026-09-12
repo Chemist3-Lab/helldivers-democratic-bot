@@ -51,7 +51,21 @@ class Settings(BaseSettings):
     )
 
     # ── Required Discord IDs ────────────────────────────────────
-    guild_id: int = Field(..., description="Target Discord server snowflake.")
+    guild_id: int | None = Field(
+        default=None,
+        description="Optional target Discord server snowflake for instant dev sync. If omitted or 0, commands sync globally.",
+    )
+
+    @field_validator("guild_id", mode="before")
+    @classmethod
+    def parse_guild_id(cls, v: object) -> int | None:
+        if v is None or v == "" or v == 0 or v == "0":
+            return None
+        try:
+            val = int(v)  # type: ignore[call-overload]
+            return val if val > 0 else None
+        except (ValueError, TypeError):
+            return None
     helldiver_channel_id: int | None = Field(
         default=None,
         description="Unified Discord channel ID for all war alerts, news dispatches, and mission debriefs.",
