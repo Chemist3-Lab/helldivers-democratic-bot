@@ -33,8 +33,5 @@ COPY src/ ./src/
 COPY ARCHITECTURE.md .
 COPY README.md* .
 
-# Define volume for persistent database storage
-VOLUME ["/app/data"]
-
 # Default entrypoint runs the bot module
 CMD ["python", "-m", "src.main"]
