@@ -120,9 +120,9 @@ def test_unclosed_paren_truncation():
 
 def test_clean_commentary_passes_through():
     """Normal, clean commentary should pass through unchanged."""
-    raw = "High Command commends Helldiver Shinoruba for purging 173 enemies with 0 friendly fire incidents! Practice evasive maneuvers on your next drop!"
+    raw = "High Command commends Helldiver Vanguard-Actual for purging 173 enemies with 0 friendly fire incidents! Practice evasive maneuvers on your next drop!"
     result = _simulate_sanitization(raw)
-    assert "commends Helldiver Shinoruba" in result
+    assert "commends Helldiver Vanguard-Actual" in result
     assert "Practice evasive" in result
     print("[PASS] test_clean_commentary_passes_through")
 

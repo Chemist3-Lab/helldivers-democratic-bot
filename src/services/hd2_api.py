@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 
 BASE_URL = "https://api.helldivers2.dev/api/v1"
 DEFAULT_SUPER_CLIENT = "HelldiversDemocracyBot"
-DEFAULT_SUPER_CONTACT = "github.com/Shinoruba"
+DEFAULT_SUPER_CONTACT = "https://github.com/Chemist3-Lab/helldivers-democratic-bot"
 
 
 # ─── Pydantic Response Models ────────────────────────────────────────────────
@@ -340,7 +340,7 @@ class HD2ApiClient:
                 headers={
                     "User-Agent": f"{self.client_name}/1.0",
                     "X-Super-Client": self.client_name,
-                    "X-Super-Contact": self.contact,
+                    "X-Super-Contact": self.contact or DEFAULT_SUPER_CONTACT,
                     "Accept-Language": "en-US",
                     "Accept": "application/json",
                 },

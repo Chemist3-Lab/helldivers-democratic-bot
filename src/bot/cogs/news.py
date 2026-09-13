@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import discord
 from discord.ext import commands, tasks
 
+from src.bot.ui.news_embeds import PATCH_GREEN, STEAM_BLUE, build_news_embed
 from src.database.repos import AlertRepository
 from src.services.steam_api import SteamApiClient, SteamNewsItem
 
@@ -20,8 +21,12 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-STEAM_BLUE = 0x1B2838
-PATCH_GREEN = 0x2A9D8F
+__all__ = [
+    "NewsCog",
+    "PATCH_GREEN",
+    "STEAM_BLUE",
+    "setup",
+]
 
 
 class NewsCog(commands.Cog, name="Steam News"):
@@ -75,14 +80,12 @@ class NewsCog(commands.Cog, name="Steam News"):
         if not channel:
             return
 
-        # Broadcast in chronological order (oldest first)
         for item in reversed(news_items):
             ext_id = item.gid
-            already_sent = await AlertRepository.is_dispatched("steam_news", ext_id)
-            if already_sent:
+            if await AlertRepository.is_dispatched("steam_news", ext_id):
                 continue
 
-            embed = self._build_news_embed(item)
+            embed = build_news_embed(item)
             role_mention = f"<@&{self.bot.settings.helldiver_role_id}>"
             await channel.send(
                 content=f"🛠️ **NEW HELLDIVERS 2 INTEL DETECTED** {role_mention}",
@@ -90,32 +93,6 @@ class NewsCog(commands.Cog, name="Steam News"):
             )
             await AlertRepository.mark_dispatched("steam_news", ext_id, title=item.title)
             log.info("Dispatched Steam patch notification '%s' (GID: %s)", item.title, item.gid)
-
-    def _build_news_embed(self, item: SteamNewsItem) -> discord.Embed:
-        """Construct a formatted Discord embed for a Steam patch or article."""
-        # Trim contents to fit within embed character limits
-        contents = item.clean_contents
-        if len(contents) > 1000:
-            contents = contents[:997] + "..."
-
-        embed = discord.Embed(
-            title=f"📜 {item.title}",
-            url=item.url,
-            description=contents or "Click the title link above to read the full Steam announcement.",
-            color=PATCH_GREEN if item.is_patch_or_update else STEAM_BLUE,
-        )
-
-        embed.set_author(
-            name=f"Arrowhead Game Studios / Steam ({item.feedlabel or 'Official'})",
-            url=item.url,
-            icon_url="https://store.steampowered.com/favicon.ico",
-        )
-
-        if item.author:
-            embed.add_field(name="Author", value=item.author, inline=True)
-
-        embed.set_footer(text="Official Super Earth Tactical Ordinance & Patch Log")
-        return embed
 
 
 async def setup(bot: HelldiversBot) -> None:

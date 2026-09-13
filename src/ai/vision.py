@@ -15,9 +15,6 @@ Includes strict Pydantic validation via `ScoreboardExtraction` and retry logic.
 
 from __future__ import annotations
 
-import asyncio
-import io
-import json
 import logging
 import re
 from typing import Any
@@ -148,7 +145,7 @@ class ScoreboardVisionExtractor:
             mime_type=mime_type,
         )
 
-        prompt = "Extract all player statistics and mission difficulty from this Helldivers 2 scoreboard."
+        prompt = "Extract all player statistics from this Helldivers 2 scoreboard."
 
         config = types.GenerateContentConfig(
             system_instruction=VISION_SYSTEM_INSTRUCTION,
@@ -158,7 +155,7 @@ class ScoreboardVisionExtractor:
         )
 
         models_to_try = [self.model_name]
-        for fallback in ("gemini-3.6-flash", "gemini-1.5-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite"):
+        for fallback in ("gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-flash-latest"):
             if fallback not in models_to_try:
                 models_to_try.append(fallback)
 
