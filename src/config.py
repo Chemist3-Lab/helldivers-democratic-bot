@@ -123,7 +123,7 @@ class Settings(BaseSettings):
         description="Interval in seconds between Steam News API polls.",
     )
     hd2_contact: str = Field(
-        default="github.com/Shinoruba",
+        default="https://github.com/Chemist3-Lab/helldivers-democratic-bot",
         description="Contact information sent via X-Super-Contact header to api.helldivers2.dev.",
     )
     log_level: str = Field(

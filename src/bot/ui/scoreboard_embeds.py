@@ -97,16 +97,42 @@ def build_leaderboard_embed(
 
 
 def calculate_dvr_rank(dvr_current: float) -> str:
-    """Determine Patriotic Rank/Title based on dvr_current."""
+    """Determine Patriotic Military Rank based on dvr_current."""
+    if dvr_current >= 600:
+        return "SUPREME MARSHAL"
+    if dvr_current >= 550:
+        return "HIGH MARSHAL"
+    if dvr_current >= 500:
+        return "MAJOR MARSHAL"
+    if dvr_current >= 450:
+        return "BRIGADIER MARSHAL"
+    if dvr_current >= 400:
+        return "COLONEL HELLDIVER"
+    if dvr_current >= 350:
+        return "LIEUTENANT COLONEL HELLDIVER"
     if dvr_current >= 300:
-        return "⭐⭐⭐⭐⭐ Super Citizen"
+        return "MAJOR HELLDIVER"
+    if dvr_current >= 260:
+        return "CAPTAIN HELLDIVER"
+    if dvr_current >= 230:
+        return "FIRST LIEUTENANT"
     if dvr_current >= 200:
-        return "⭐⭐⭐⭐ Elite Helldiver"
-    if dvr_current >= 120:
-        return "⭐⭐⭐ Veteran Helldiver"
+        return "SECOND LIEUTENANT"
+    if dvr_current >= 175:
+        return "COMMAND SERGEANT HELLDIVER"
+    if dvr_current >= 150:
+        return "MASTER SERGEANT HELLDIVER"
+    if dvr_current >= 125:
+        return "GUNNERY SERGEANT HELLDIVER"
+    if dvr_current >= 100:
+        return "STAFF SERGEANT HELLDIVER"
+    if dvr_current >= 75:
+        return "SERGEANT HELLDIVER"
     if dvr_current >= 50:
-        return "⭐⭐ Helldiver"
-    return "⭐ Cadet"
+        return "CORPORAL HELLDIVER"
+    if dvr_current >= 25:
+        return "LANCE HELLDIVER"
+    return "LINE HELLDIVER"
 
 
 def build_profile_embed(
@@ -120,7 +146,7 @@ def build_profile_embed(
 
     embed = discord.Embed(
         title=f"🎖️ CAREER DOSSIER: {prof.display_name}",
-        description=f"**Current Status:** {rank}\n**Rolling Democratic Valor Rating (DVR):** `{prof.dvr_current:.1f}`",
+        description=f"**Current Status:** 🎖️ {rank}\n**Rolling Democratic Valor Rating (DVR):** `{prof.dvr_current:.1f}`",
         color=PROFILE_PURPLE,
     )
     embed.set_thumbnail(url=target.display_avatar.url)

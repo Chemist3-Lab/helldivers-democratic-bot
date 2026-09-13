@@ -107,12 +107,25 @@ def test_parse_tactical_sections():
 
 
 def test_calculate_dvr_rank():
-    """calculate_dvr_rank must return patriotic titles corresponding to DVR thresholds."""
-    assert calculate_dvr_rank(350.0) == "⭐⭐⭐⭐⭐ Super Citizen"
-    assert calculate_dvr_rank(220.0) == "⭐⭐⭐⭐ Elite Helldiver"
-    assert calculate_dvr_rank(130.0) == "⭐⭐⭐ Veteran Helldiver"
-    assert calculate_dvr_rank(60.0) == "⭐⭐ Helldiver"
-    assert calculate_dvr_rank(10.0) == "⭐ Cadet"
+    """calculate_dvr_rank must return patriotic military ranks corresponding to DVR thresholds."""
+    assert calculate_dvr_rank(650.0) == "SUPREME MARSHAL"
+    assert calculate_dvr_rank(560.0) == "HIGH MARSHAL"
+    assert calculate_dvr_rank(510.0) == "MAJOR MARSHAL"
+    assert calculate_dvr_rank(460.0) == "BRIGADIER MARSHAL"
+    assert calculate_dvr_rank(410.0) == "COLONEL HELLDIVER"
+    assert calculate_dvr_rank(360.0) == "LIEUTENANT COLONEL HELLDIVER"
+    assert calculate_dvr_rank(310.0) == "MAJOR HELLDIVER"
+    assert calculate_dvr_rank(270.0) == "CAPTAIN HELLDIVER"
+    assert calculate_dvr_rank(240.0) == "FIRST LIEUTENANT"
+    assert calculate_dvr_rank(210.0) == "SECOND LIEUTENANT"
+    assert calculate_dvr_rank(180.0) == "COMMAND SERGEANT HELLDIVER"
+    assert calculate_dvr_rank(160.0) == "MASTER SERGEANT HELLDIVER"
+    assert calculate_dvr_rank(130.0) == "GUNNERY SERGEANT HELLDIVER"
+    assert calculate_dvr_rank(110.0) == "STAFF SERGEANT HELLDIVER"
+    assert calculate_dvr_rank(80.0) == "SERGEANT HELLDIVER"
+    assert calculate_dvr_rank(60.0) == "CORPORAL HELLDIVER"
+    assert calculate_dvr_rank(30.0) == "LANCE HELLDIVER"
+    assert calculate_dvr_rank(10.0) == "LINE HELLDIVER"
 
 
 def test_deterministic_id_resolution():
